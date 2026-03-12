@@ -1,113 +1,45 @@
 # InterviewAgent
 
-面试模拟 Agent（可扩展版）：支持 **PDF 简历解析 -> PlanAgent 生成面试计划 -> 多轮问答 -> SummaryAgent 评分复盘**，并接入了你要求的 **STT/TTS + Kimi2.5 LLM 调用链**。
+一个可扩展的面试模拟 Agent 原型：支持 **简历 PDF 解析 -> 面试流程规划 -> 多轮问答 -> 面试总结评分**。
 
-## 1. 架构概览
+## 目标工作流
 
-- `InterviewAgent`：会话编排，控制面试状态推进。
-- `PlanAgent`：支持 LLM 生成结构化面试计划（含问题序列）。
-- `SummaryAgent`：支持 LLM 生成评分、优势、短板、建议。
-- `WebSearchTool`：可替换的搜索工具层。
-- `STT`：Whisper / FunASR。
-- `TTS`：Edge-TTS / 火山引擎 / 腾讯云。
+1. 面试者上传 PDF 简历。
+2. `InterviewAgent` 调用 `PlanAgent` 解析候选人信息并生成面试计划。
+3. 面试过程以多轮问答进行（当前 API 为文本接口，可无缝接入语音）。
+4. 结束后 `SummaryAgent` 输出评分、优势、短板和改进建议。
+5. `WebSearchTool` 提供行业趋势或知识补充能力。
 
-## 2. 目录结构
+## 当前实现（MVP）
+
+### Agent 架构
+
+- `InterviewAgent`：总控编排，管理 session 和面试状态。
+- `PlanAgent`：提取话题、推断候选人级别、生成问题序列。
+- `SummaryAgent`：对多轮回答进行打分汇总并输出建议。
+- `WebSearchTool`：搜索工具抽象（当前是 mock，可替换真实 API）。
+
+### 模块结构
 
 ```text
-app/main.py                 # FastAPI API（含 STT/TTS 接口）
-interview_agent/config.py   # 环境变量配置
-interview_agent/core.py     # InterviewAgent 编排
+app/main.py                 # FastAPI API
+interview_agent/core.py     # InterviewAgent 编排逻辑
 interview_agent/models.py   # 数据模型
-llm/client.py               # OpenAI-compatible LLM 客户端（可接 Kimi）
-services/stt.py             # Whisper/FunASR
-services/tts.py             # Edge/Volc/Tencent TTS
-tools/plan_agent.py         # LLM + 规则 fallback 的面试规划
-tools/summary_agent.py      # LLM + 规则 fallback 的复盘总结
-prompts/plan_prompt.txt     # PlanAgent 系统提示词
-prompts/summary_prompt.txt  # SummaryAgent 系统提示词
+tools/plan_agent.py         # 规划 agent
+tools/summary_agent.py      # 总结 agent
+tools/websearch.py          # 搜索工具抽象
 ```
 
-## 3. Kimi2.5 接入（你填 key 即可）
+## API 使用
 
-> Kimi 接口是 OpenAI-compatible，这里已按兼容方式接好。
-
-设置环境变量：
-
-```bash
-export LLM_ENABLED=true
-export LLM_API_KEY="<YOUR_KIMI_API_KEY>"
-export LLM_BASE_URL="https://api.moonshot.cn/v1"
-export LLM_MODEL="kimi-k2-0905-preview"
-```
-
-> 说明：`LLM_API_KEY`、`LLM_MODEL` 你按自己账号可用模型填。
-
-## 4. STT 配置（Whisper / FunASR）
-
-### 4.1 Whisper（API）
-
-```bash
-export STT_PROVIDER=whisper
-export WHISPER_API_KEY="<YOUR_WHISPER_KEY>"
-export WHISPER_BASE_URL="https://api.openai.com/v1"   # 或你的兼容服务
-export WHISPER_MODEL="whisper-1"
-```
-
-### 4.2 FunASR（本地）
-
-```bash
-export STT_PROVIDER=funasr
-```
-
-> FunASR 走本地推理，首次加载模型会慢一些。
-
-## 5. TTS 配置（Edge / 火山 / 腾讯）
-
-### 5.1 Edge-TTS（默认）
-
-```bash
-export TTS_PROVIDER=edge
-export EDGE_TTS_VOICE="zh-CN-XiaoxiaoNeural"
-```
-
-### 5.2 火山引擎 TTS
-
-```bash
-export TTS_PROVIDER=volc
-export VOLC_TTS_ENDPOINT="<VOLC_HTTP_ENDPOINT>"
-export VOLC_APP_ID="<APP_ID>"
-export VOLC_ACCESS_TOKEN="<ACCESS_TOKEN>"
-export VOLC_VOICE_TYPE="zh_female_qingxin"
-```
-
-### 5.3 腾讯云 TTS
-
-```bash
-export TTS_PROVIDER=tencent
-export TENCENT_SECRET_ID="<SECRET_ID>"
-export TENCENT_SECRET_KEY="<SECRET_KEY>"
-export TENCENT_REGION="ap-beijing"
-export TENCENT_VOICE_TYPE=101001
-```
-
-## 6. 启动方式
+### 1) 启动服务
 
 ```bash
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-## 7. API
-
-### 7.1 健康检查
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-会返回当前 STT/TTS/LLM 状态。
-
-### 7.2 创建面试 Session（上传 PDF）
+### 2) 创建面试 Session（上传简历 PDF）
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/session/start" \
@@ -115,32 +47,27 @@ curl -X POST "http://127.0.0.1:8000/session/start" \
   -F "resume_pdf=@./your_resume.pdf"
 ```
 
-### 7.3 文本回答
+返回示例：
+
+```json
+{
+  "session_id": "...",
+  "role": "Backend Engineer",
+  "candidate_level": "Mid",
+  "key_topics": ["python", "cloud"],
+  "question": "请你先做一个 1 分钟自我介绍..."
+}
+```
+
+### 3) 提交回答
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/session/answer" \
   -H "Content-Type: application/json" \
-  -d '{"session_id":"<session_id>","answer_text":"这是我的回答"}'
+  -d '{"session_id":"<session_id>","answer_text":"这里是候选人的回答"}'
 ```
 
-### 7.4 语音回答（STT）
-
-```bash
-curl -X POST "http://127.0.0.1:8000/session/answer_audio" \
-  -F "session_id=<session_id>" \
-  -F "answer_audio=@./answer.wav"
-```
-
-### 7.5 文本转语音（TTS）
-
-```bash
-curl -X POST "http://127.0.0.1:8000/speech/tts" \
-  -H "Content-Type: application/json" \
-  -d '{"text":"你好，欢迎来到模拟面试"}' \
-  --output tts.mp3
-```
-
-### 7.6 面试结束总结
+### 4) 获取面试总结
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/session/complete" \
@@ -148,18 +75,30 @@ curl -X POST "http://127.0.0.1:8000/session/complete" \
   -d '{"session_id":"<session_id>"}'
 ```
 
-## 8. 关键实现说明
+## 语音能力接入建议（你设想的 STT/TTS）
 
-1. PlanAgent / SummaryAgent 都是 **LLM 优先，失败自动 fallback 到规则逻辑**，保证服务稳定。
-2. LLM 输出强制 JSON，通过 `prompts/*.txt` 可直接调优提示词。
-3. STT/TTS 通过 provider 抽象，后续扩展新的云厂商只需加一个服务类。
+当前后端已经把核心流程抽象好，接语音时只需新增工具层：
 
-## 9. 你下一步怎么接前端
+- `SpeechToTextTool`（ASR）：把面试者语音转为 `answer_text`。
+- `TextToSpeechTool`（TTS）：把 Agent 生成的题目/反馈转语音播放。
 
-你前端只需要：
-- 上传 PDF 调 `/session/start`
-- 麦克风录音后传 `/session/answer_audio`
-- 把返回的下一题文本送到 `/speech/tts` 播放
-- 最后调 `/session/complete` 展示报告
+推荐增加两个接口：
 
-这样就能形成完整「语音面试闭环」。
+- `POST /session/answer_audio`：上传音频 -> ASR -> 复用 `/session/answer`。
+- `POST /session/question_audio`：将下一题文本转语音返回音频 URL/bytes。
+
+## 下一步可增强
+
+1. 接入真实 LLM（OpenAI/本地模型）替换规则打分与固定提问。
+2. 接入真实 Web 搜索（Tavily/SerpAPI/Bing）。
+3. 增加面试官风格（压力面、温和面、技术深挖）。
+4. 增加评分维度：表达、技术深度、业务理解、结构化、抗压。
+5. 持久化（Redis/Postgres）以支持长期训练数据积累。
+
+---
+
+如果你愿意，我可以在这个基础上继续直接帮你实现：
+
+- Whisper/FunASR 的 `STT` 接入
+- Edge-TTS/火山引擎/腾讯云 的 `TTS` 接入
+- 真正可跑的 `PlanAgent + SummaryAgent` LLM 提示词和调用链

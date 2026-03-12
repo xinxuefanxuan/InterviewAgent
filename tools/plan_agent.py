@@ -1,64 +1,23 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from interview_agent.models import InterviewPlan, InterviewQuestion, InterviewStage
-from llm.client import LLMClient
 from tools.websearch import WebSearchTool
 
 
 class PlanAgent:
     """Responsible for topic mining + interview planning."""
 
-    def __init__(self, websearch: WebSearchTool, llm_client: Optional[LLMClient] = None) -> None:
+    def __init__(self, websearch: WebSearchTool) -> None:
         self.websearch = websearch
-        self.llm_client = llm_client
-        self.system_prompt = Path("prompts/plan_prompt.txt").read_text(encoding="utf-8")
 
     def build_plan(self, resume_text: str, role_hint: str = "Software Engineer") -> InterviewPlan:
-        if self.llm_client:
-            try:
-                return self._build_plan_with_llm(resume_text, role_hint)
-            except Exception:
-                # fallback to deterministic planner
-                pass
-        return self._build_plan_with_rules(resume_text, role_hint)
-
-    def _build_plan_with_llm(self, resume_text: str, role_hint: str) -> InterviewPlan:
-        search_context = self.websearch.search(
-            f"{role_hint} interview trends",
-            max_results=3,
-        )
-        user_prompt = (
-            f"岗位: {role_hint}\n"
-            f"简历文本:\n{resume_text[:8000]}\n\n"
-            f"可参考行业信息:\n- " + "\n- ".join(search_context)
-        )
-
-        result = self.llm_client.chat_json(self.system_prompt, user_prompt, temperature=0.3)
-
-        questions = [
-            InterviewQuestion(
-                stage=InterviewStage(item["stage"]),
-                text=item["text"],
-                expected_focus=item["expected_focus"],
-            )
-            for item in result["questions"]
-        ]
-
-        return InterviewPlan(
-            role=result.get("role", role_hint),
-            candidate_level=result.get("candidate_level", "Mid"),
-            key_topics=result.get("key_topics", ["python", "system design"]),
-            questions=questions,
-        )
-
-    def _build_plan_with_rules(self, resume_text: str, role_hint: str) -> InterviewPlan:
         role = role_hint
         candidate_level = self._infer_level(resume_text)
         key_topics = self._extract_topics(resume_text)
 
+        # Optional: search latest trends to enrich interview prompts.
         search_context = self.websearch.search(
             f"{role} interview trends {', '.join(key_topics[:3])}",
             max_results=2,
